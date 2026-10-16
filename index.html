@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="th" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>นักสืบไซเบอร์ ป.5 (AR Cyber Sleuth)</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome v6 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <!-- Google Fonts: Kanit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- MediaPipe Hands & Camera Utils -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <!-- Canvas Confetti for winning celebrations -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+    <style>
+        * {
+            font-family: 'Kanit', sans-serif;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body, html {
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            background-color: #0f172a;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* Glassmorphism utility */
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .glass-card {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Video mirror flip */
+        .mirror {
+            transform: scaleX(-1);
+        }
+
+        /* Pulsing & Floating animations */
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-8px); }
+        }
+
+        .animate-float {
+            animation: float 4s ease-in-out infinite;
+        }
+
+        @keyframes pop-in {
+            0% { transform: scale(0.9); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .animate-pop-in {
+            animation: pop-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        /* Custom AR hand pointer glowing animation */
+        .ar-cursor {
+            position: absolute;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(56,189,248,0.9) 0%, rgba(14,165,233,0.4) 60%, rgba(2,132,199,0) 100%);
+            border: 2px solid #38bdf8;
+            box-shadow: 0 0 15px #38bdf8, inset 0 0 10px #0284c7;
+            pointer-events: none;
+            z-index: 9999;
+            transform: translate(-50%, -50%);
+            transition: width 0.15s, height 0.15s, background-color 0.15s;
+        }
+
+        .ar-cursor.pinching {
+            width: 24px;
+            height: 24px;
+            background: radial-gradient(circle, rgba(239,68,68,0.9) 0%, rgba(220,38,38,0.4) 60%, rgba(185,28,28,0) 100%);
+            border-color: #ef4444;
+            box-shadow: 0 0 20px #ef4444;
+        }
+
+        /* Radial progress bar for pinch hover */
+        .hover-progress-ring {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 9999px;
+        }
+    </style>
+</head>
+<body class="h-full text-slate-100 flex flex-col justify-between select-none overflow-hidden relative">
+
+    <!-- Fullscreen AR Video Feed Background -->
+    <video id="webcam" class="absolute inset-0 w-full h-full object-cover mirror pointer-events-none z-0" playsinline></video>
+    <canvas id="ar-canvas" class="absolute inset-0 w-full h-full object-cover mirror pointer-events-none z-0"></canvas>
+    <div id="ar-overlay-shade" class="absolute inset-0 bg-slate-950/60 pointer-events-none z-0"></div>
+
+    <!-- Hand Pointer Overlay Cursor -->
+    <div id="ar-pointer" class="ar-cursor hidden">
+        <svg class="hover-progress-ring w-12 h-12" viewBox="0 0 36 36">
+            <path id="progress-path" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#38bdf8" stroke-width="3" stroke-dasharray="0, 100" />
+        </svg>
+    </div>
+
+    <!-- Hidden Canvas for Photo Snapshots -->
+    <canvas id="photo-canvas" class="hidden"></canvas>
+
+    <!-- SCREEN 1: WELCOME SCREEN -->
+    <section id="screen-welcome" class="relative z-10 h-full w-full flex flex-col items-center justify-between p-4 sm:p-6 overflow-y-auto">
+        
+        <!-- Header Title Banner -->
+        <div class="text-center mt-2 animate-float">
+            <span class="inline-block bg-sky-500/20 text-sky-400 text-xs sm:text-sm font-semibold px-4 py-1 rounded-full border border-sky-500/30 mb-2">
+                <i class="fa-solid fa-graduation-cap mr-1"></i> วิทยาการคำนวณ ป.5/3
+            </span>
+            <h1 class="text-3xl sm:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-sky-400 via-teal-300 to-indigo-400 drop-shadow-lg">
+                🕵️‍♂️ นักสืบไซเบอร์ ป.5
+            </h1>
+            <p class="text-slate-300 text-xs sm:text-sm mt-1">ภารกิจตรวจจับภัยคุกคามและเรียนรู้ความปลอดภัยออนไลน์ (AR Edition)</p>
+        </div>
+
+        <!-- Camera Snapshot & Avatar Input Container -->
+        <div class="glass-panel max-w-md w-full rounded-3xl p-5 my-auto shadow-2xl flex flex-col items-center text-center animate-pop-in">
+            
+            <p class="text-xs text-sky-300 font-medium mb-3 flex items-center gap-1.5">
+                <i class="fa-solid fa-camera"></i> ถ่ายภาพประจำตัวเพื่อลงทะเบียนนักสืบ
+            </p>
+
+            <!-- Camera Circle Display -->
+            <div class="relative w-36 h-36 sm:w-44 sm:h-44 rounded-full overflow-hidden border-4 border-sky-400/80 shadow-lg shadow-sky-500/30 group">
+                <video id="preview-video" class="w-full h-full object-cover mirror" autoplay playsinline muted></video>
+                <img id="preview-photo" class="w-full h-full object-cover hidden" alt="Player Photo">
+                
+                <div class="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                    <span class="text-xs text-white bg-slate-900/80 px-2 py-1 rounded-md">ภาพถ่ายของคุณ</span>
+                </div>
+            </div>
+
+            <!-- Capture / Retake Button -->
+            <button id="btn-snap" onclick="takeSnapshot()" class="mt-3 bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-600 hover:to-teal-600 text-white font-bold text-xs sm:text-sm py-2 px-5 rounded-full shadow-md active:scale-95 transition flex items-center gap-2">
+                <i class="fa-solid fa-camera-retro"></i> <span id="snap-btn-text">ถ่ายรูปนักสืบ</span>
+            </button>
+
+            <!-- Name Input Field -->
+            <div class="w-full mt-4 text-left">
+                <label class="text-xs text-slate-300 font-semibold block mb-1">
+                    <i class="fa-solid fa-id-card text-sky-400 mr-1"></i> ชื่อ-นามสกุล / ชื่อเล่นนักเรียน:
+                </label>
+                <input type="text" id="player-name-input" maxlength="20" placeholder="ระบุชื่อของคุณที่นี่..." class="w-full bg-slate-800/80 border border-slate-600 focus:border-sky-400 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-400 outline-none transition shadow-inner">
+            </div>
+
+            <!-- Start Game Trigger Button -->
+            <button id="btn-start-game" disabled onclick="startGame()" class="w-full mt-5 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 px-6 rounded-xl shadow-lg shadow-emerald-500/30 active:scale-95 transition flex items-center justify-center gap-2 text-base">
+                <span>เริ่มภารกิจนักสืบ</span> <i class="fa-solid fa-arrow-right"></i>
+            </button>
+        </div>
+
+        <!-- How to play hint -->
+        <div class="text-center text-xs text-slate-400 max-w-sm">
+            <i class="fa-solid fa-hand-pointer text-sky-400 mr-1"></i> รองรับทั้ง **สัมผัสหน้าจอ** หรือ **ใช้นิ้วชี้โบกผ่านกล้อง (AR)** ในการตอบคำถาม
+        </div>
+    </section>
+
+    <!-- SCREEN 2: GAME SCREEN -->
+    <section id="screen-game" class="relative z-10 h-full w-full flex flex-col justify-between p-3 sm:p-5 hidden">
+        
+        <!-- Top Game Status Header Bar -->
+        <div class="glass-panel rounded-2xl p-2.5 sm:p-3 flex items-center justify-between shadow-lg">
+            
+            <!-- Player Info -->
+            <div class="flex items-center gap-2.5">
+                <img id="game-player-img" class="w-10 h-10 sm:w-12 sm:h-12 rounded-full object-cover border-2 border-sky-400 shadow" src="" alt="Player">
+                <div>
+                    <div id="game-player-name" class="font-bold text-xs sm:text-sm text-white line-clamp-1">ชื่อผู้เล่น</div>
+                    <div class="text-[10px] sm:text-xs text-sky-300 flex items-center gap-1">
+                        <i class="fa-solid fa-shield-halved"></i> นักสืบระดับ ป.5
+                    </div>
+                </div>
+            </div>
+
+            <!-- Score & Progress Badges -->
+            <div class="flex items-center gap-2 sm:gap-4">
+                <!-- Question Counter -->
+                <div class="bg-slate-800/80 border border-slate-700 rounded-xl px-3 py-1.5 text-center">
+                    <span class="text-[10px] text-slate-400 block uppercase">ข้อที่</span>
+                    <span id="question-progress" class="font-extrabold text-sm sm:text-base text-amber-400">1/12</span>
+                </div>
+
+                <!-- Live Score -->
+                <div class="bg-slate-800/80 border border-slate-700 rounded-xl px-3 py-1.5 text-center">
+                    <span class="text-[10px] text-slate-400 block uppercase">คะแนน</span>
+                    <span id="current-score" class="font-extrabold text-sm sm:text-base text-emerald-400">0</span>
+                </div>
+
+                <!-- Hand Tracking Status Indicator -->
+                <div id="ar-status-badge" class="hidden sm:flex items-center gap-1.5 bg-sky-950/80 border border-sky-500/40 text-sky-300 text-xs px-2.5 py-1.5 rounded-xl">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                    <span id="ar-status-text">AR Active</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Question & Options Interaction Area -->
+        <div class="my-auto max-w-3xl w-full mx-auto flex flex-col gap-3 sm:gap-4 animate-pop-in">
+            
+            <!-- Question Card -->
+            <div class="glass-panel rounded-3xl p-4 sm:p-6 text-center border-t-4 border-t-sky-400 shadow-2xl relative">
+                <span id="q-category" class="inline-block bg-sky-500/20 text-sky-300 text-[10px] sm:text-xs font-semibold px-3 py-1 rounded-full border border-sky-500/30 mb-2">
+                    หมวดหมู่ภัยคุกคาม
+                </span>
+                <h2 id="question-text" class="text-base sm:text-xl font-bold text-white leading-relaxed">
+                    ข้อความคำถามจะแสดงที่นี่...
+                </h2>
+            </div>
+
+            <!-- Choice Answer Buttons Grid -->
+            <div id="choices-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
+                <!-- Dynamically generated choice cards -->
+            </div>
+        </div>
+
+        <!-- Bottom Feedback Banner -->
+        <div id="game-footer-msg" class="glass-panel rounded-xl p-2.5 text-center text-xs text-slate-300 flex items-center justify-between">
+            <span><i class="fa-solid fa-lightbulb text-amber-400 mr-1"></i> แตะที่ตัวเลือก หรือใช้นิ้วชี้ค้างไว้เพื่อเลือกคำตอบ</span>
+            <button onclick="toggleAudio()" class="text-slate-400 hover:text-white px-2">
+                <i id="audio-icon" class="fa-solid fa-volume-high"></i>
+            </button>
+        </div>
+    </section>
+
+    <!-- SCREEN 3: SUMMARY & LEADERBOARD SCREEN -->
+    <section id="screen-summary" class="relative z-10 h-full w-full flex flex-col items-center justify-between p-4 sm:p-6 hidden overflow-y-auto">
+        
+        <div class="max-w-2xl w-full glass-panel rounded-3xl p-5 sm:p-7 shadow-2xl my-auto text-center border-4 border-sky-500/40 animate-pop-in">
+            
+            <!-- Trophy & Title -->
+            <div class="text-5xl sm:text-6xl my-1 animate-bounce">🏆</div>
+            <h2 class="text-2xl sm:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-sky-300 to-emerald-300">
+                สรุปผลการทำภารกิจนักสืบ
+            </h2>
+            <p class="text-xs sm:text-sm text-slate-300 mt-0.5">การเรียนรู้เรื่องความปลอดภัยออนไลน์ ชั้นประถมศึกษาปีที่ 5</p>
+
+            <!-- Score Summary Card -->
+            <div class="grid grid-cols-2 gap-3 my-4">
+                <div class="bg-slate-800/80 rounded-2xl p-3 border border-slate-700">
+                    <span class="text-xs text-slate-400 block">คะแนนรวมที่ได้</span>
+                    <span id="final-score" class="text-3xl sm:text-4xl font-extrabold text-emerald-400">120</span>
+                    <span class="text-xs text-slate-400">/ 120 คะแนน</span>
+                </div>
+                <div class="bg-slate-800/80 rounded-2xl p-3 border border-slate-700">
+                    <span class="text-xs text-slate-400 block">ระดับการประเมิน</span>
+                    <span id="final-grade" class="text-lg sm:text-2xl font-bold text-sky-300 mt-1 block">ยอดเยี่ยม! 🌟</span>
+                </div>
+            </div>
+
+            <!-- Leaderboard Table Container -->
+            <div class="text-left mt-4">
+                <h3 class="text-sm font-bold text-sky-400 mb-2 flex items-center gap-1.5">
+                    <i class="fa-solid fa-ranking-star"></i> ตารางคะแนนสูงสุด (Leaderboard)
+                </h3>
+                
+                <div class="bg-slate-900/80 rounded-2xl border border-slate-700 overflow-hidden max-h-48 overflow-y-auto">
+                    <table class="w-full text-xs text-left text-slate-300">
+                        <thead class="bg-slate-800 text-slate-400 uppercase text-[10px]">
+                            <tr>
+                                <th class="px-3 py-2 text-center">อันดับ</th>
+                                <th class="px-3 py-2">นักสืบ</th>
+                                <th class="px-3 py-2 text-right">คะแนน</th>
+                            </tr>
+                        </thead>
+                        <tbody id="leaderboard-body">
+                            <!-- Leaderboard items inserted dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex gap-3 mt-5">
+                <button onclick="restartGame()" class="flex-1 bg-sky-500 hover:bg-sky-600 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-sky-500/30 flex items-center justify-center gap-2 text-sm">
+                    <i class="fa-solid fa-rotate-right"></i> เล่นใหม่อีกครั้ง
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <script type="module">
+        // Firebase Setup & Imports
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, getDocs, query, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Configuration setup
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'cyber-sleuth-p5';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' 
+            ? JSON.parse(__firebase_config) 
+            : {
+                apiKey: "AIzaSyDummyKeyForFallbackOnly",
+                authDomain: "dummy-project.firebaseapp.com",
+                projectId: "dummy-project",
+                storageBucket: "dummy-project.appspot.com",
+                messagingSenderId: "123456789",
+                appId: "1:123456789:web:abcdef"
+            };
+
+        let app, auth, db;
+        let currentUser = null;
+
+        try {
+            app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+
+            // Authenticate
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                signInWithCustomToken(auth, __initial_auth_token).then(userCredential => {
+                    currentUser = userCredential.user;
+                }).catch(err => {
+                    signInAnonymously(auth).then(res => currentUser = res.user);
+                });
+            } else {
+                signInAnonymously(auth).then(res => currentUser = res.user).catch(e => console.log("Firebase Auth Fallback"));
+            }
+        } catch (e) {
+            console.warn("Firestore initialization skipped or running offline mode.", e);
+        }
+
+        // Expose Firebase submit function globally
+        window.saveScoreToLeaderboard = async function(playerName, score) {
+            if (!db || !currentUser) return;
+            try {
+                // Rule 1: Use strict path /artifacts/{appId}/public/data/{collectionName}
+                const leaderboardRef = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
+                await addDoc(leaderboardRef, {
+                    name: playerName,
+                    score: score,
+                    timestamp: new Date().toISOString()
+                });
+            } catch (err) {
+                console.error("Error saving score:", err);
+            }
+        };
+
+        window.fetchLeaderboard = async function() {
+            const tbody = document.getElementById('leaderboard-body');
+            tbody.innerHTML = `<tr><td colspan="3" class="px-3 py-4 text-center text-slate-500">กำลังโหลดข้อมูล...</td></tr>`;
+
+            if (!db) {
+                tbody.innerHTML = `<tr><td colspan="3" class="px-3 py-4 text-center text-slate-500">โหมดเล่นเดี่ยว (ไม่ได้เชื่อมต่อคลาวด์)</td></tr>`;
+                return;
+            }
+
+            try {
+                // Rule 1 & Rule 2: Simple query without complex orderBy to prevent indexing errors
+                const leaderboardRef = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
+                const snapshot = await getDocs(leaderboardRef);
+
+                let records = [];
+                snapshot.forEach(doc => records.push(doc.data()));
+
+                // Sort in JS memory
+                records.sort((a, b) => b.score - a.score);
+                records = records.slice(0, 10); // top 10
+
+                if (records.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="3" class="px-3 py-4 text-center text-slate-500">ยังไม่มีข้อมูลคะแนน</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = '';
+                records.forEach((rec, idx) => {
+                    const row = document.createElement('tr');
+                    row.className = idx % 2 === 0 ? 'bg-slate-800/40' : 'bg-slate-900/40';
+                    row.innerHTML = `
+                        <td class="px-3 py-2 text-center font-bold ${idx === 0 ? 'text-amber-400' : idx === 1 ? 'text-slate-300' : idx === 2 ? 'text-amber-600' : ''}">${idx + 1}</td>
+                        <td class="px-3 py-2 text-white font-medium">${escapeHtml(rec.name)}</td>
+                        <td class="px-3 py-2 text-right font-bold text-emerald-400">${rec.score}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            } catch (e) {
+                console.error("Error fetching leaderboard:", e);
+                tbody.innerHTML = `<tr><td colspan="3" class="px-3 py-4 text-center text-slate-500">ไม่สามารถโหลดคะแนนได้</td></tr>`;
+            }
+        };
+
+        function escapeHtml(str) {
+            return str ? str.replace(/[&<>"']/g, function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]; }) : '';
+        }
+    </script>
+
+    <script>
+        /* =========================================================================
+           QUESTIONS DATASET (วิทยาการคำนวณ ป.5/3 - ความปลอดภัยออนไลน์)
+           ========================================================================= */
+        const QUESTION_BANK = [
+            {
+                category: "รหัสผ่านปลอดภัย (Password Safety)",
+                question: "ข้อใดคือการตั้งรหัสผ่านที่ปลอดภัยที่สุดสำหรับบัญชีเรียนออนไลน์?",
+                choices: [
+                    "12345678",
+                    "วันเดือนปีเกิดของตนเอง",
+                    "P@ss5W0rd#2026 (ผสมตัวพิมพ์ใหญ่ เล็ก เลข และสัญลักษณ์)",
+                    "ชื่อเล่นภาษาไทย"
+                ],
+                correct: 2,
+                explanation: "รหัสผ่านที่ดีควรยาวอย่างน้อย 8 ตัวอักษร และผสมอักขระหลายประเภท"
+            },
+            {
+                category: "การหลอกลวงออนไลน์ (Phishing)",
+                question: "หากนักเรียนได้รับ SMS ว่า 'ยินดีด้วย คุณได้รับทุนการศึกษา 10,000 บาท กดลิงก์เพื่อกรอกเลขบัตรประชาชน' ควรทำอย่างไร?",
+                choices: [
+                    "รีบกดลิงก์และกรอกข้อมูลทันที",
+                    "ส่งต่อให้เพื่อนๆ ในชั้นเรียนกดด้วย",
+                    "สงสัยว่าเป็น Phishing ห้ามกดลิงก์ และแจ้งผู้ปกครองหรือครู",
+                    "โอนเงินค่าธรรมเนียมก่อนรับทุน"
+                ],
+                correct: 2,
+                explanation: "อย่ากดลิงก์แปลกปลอมที่อ้างการแจกเงินหรือรางวัล เพราะเป็น Phishing หลอกเอาข้อมูลส่วนตัว"
+            },
+            {
+                category: "ข้อมูลส่วนตัว (Privacy)",
+                question: "ข้อมูลชนิดใดต่อไปนี้ **ไม่ควร** โพสต์เป็นสาธารณะบนสื่อสังคมออนไลน์?",
+                choices: [
+                    "ภาพวาดการ์ตูนที่แต่งเอง",
+                    "บัตรประจำตัวประชาชน และเบอร์โทรศัพท์บ้าน",
+                    "รูปวิวสวนสาธารณะ",
+                    "สติ๊กเกอร์ให้กำลังใจเพื่อน"
+                ],
+                correct: 1,
+                explanation: "เลขบัตรประชาชน เบอร์โทร และที่อยู่ เป็นข้อมูลส่วนบุคคลที่อันตรายหากหลุดไป"
+            },
+            {
+                category: "การบูลลี่ออนไลน์ (Cyberbullying)",
+                question: "หากเห็นเพื่อนถูกแกล้งหรือใช้วาจารุนแรงด่าทอในกลุ่มแชต นักสืบไซเบอร์ควรปฏิบัติตนอย่างไร?",
+                choices: [
+                    "ร่วมพิมพ์ด่าทอซ้ำเติมเพื่อน",
+                    "แคปหน้าจอไว้เป็นหลักฐาน และแจ้งคุณครูหรือผู้ใหญ่",
+                    "แชร์รูปที่ถูกแกล้งไปยังกลุ่มอื่น",
+                    "นิ่งเฉยและให้กำลังใจฝ่ายที่แกล้ง"
+                ],
+                correct: 1,
+                explanation: "เมื่อพบ Cyberbullying ต้องไม่ร่วมรังแก ให้เก็บหลักฐานแล้วแจ้งผู้ใหญ่"
+            },
+            {
+                category: "ไวรัสและมัลแวร์ (Malware)",
+                question: "เมื่อมีป๊อปอัปเด้งขึ้นมาขณะเล่นเว็บว่า 'เครื่องของคุณติดไวรัส! กดดาวน์โหลดโปรแกรมนี้ฟรี' ควรทำอย่างไร?",
+                choices: [
+                    "กดดาวน์โหลดทันทีเพื่อลบไวรัส",
+                    "ปิดหน้าต่างป๊อปอัปนั้นทันที และไม่กดดาวน์โหลด",
+                    "กรอกเลขบัตรเครดิตผู้ปกครองเพื่อซื้อ",
+                    "แชร์เว็บไซต์นี้ให้เพื่อน"
+                ],
+                correct: 1,
+                explanation: "ป๊อปอัปหลอกลวงมักแอบอ้างว่าติดไวรัสเพื่อหลอกให้เราโหลดมัลแวร์ลงเครื่อง"
+            },
+            {
+                category: "ลิขสิทธิ์และจริยธรรม (Copyright)",
+                question: "นักเรียนต้องการนำรูปภาพจากอินเทอร์เน็ตมาทำรายงานส่งครู ข้อใดปฏิบัติได้ถูกต้องที่สุด?",
+                choices: [
+                    "แอบอ้างว่าตนเองเป็นคนถ่ายภาพนั้นเอง",
+                    "นำภาพมาใช้ และเขียนอ้างอิงอ้างที่มาของภาพให้ชัดเจน",
+                    "นำภาพไปขายต่อเพื่อหา รายได้เสริม",
+                    "ตัดลายน้ำชื่อเจ้าของภาพออก"
+                ],
+                correct: 1,
+                explanation: "การนำผลงานผู้อื่นมาใช้ต้องระบุที่มา (Credit) ให้ถูกต้องเสมอ"
+            },
+            {
+                category: "มิตรแท้หรือมิตรซ้อน (Online Stranger)",
+                question: "มีคนแปลกหน้าในเกมออนไลน์ชวนไปเจอข้างนอกโรงเรียน โดยสัญญาว่าจะซื้อไอเทมเกมให้ นักเรียนควรทำอย่างไร?",
+                choices: [
+                    "แอบไปพบคนเดียวหลังเลิกเรียน",
+                    "ปฏิเสธ และรีบบอกผู้ปกครองหรือครูให้ทราบทันที",
+                    "ส่งแผนที่บ้านตนเองไปให้เขา",
+                    "โอนเงินค่ารถให้เขามารับ"
+                ],
+                correct: 1,
+                explanation: "อย่าไว้ใจคนแปลกหน้าบนโลกออนไลน์ และห้ามไปพบโดยลำพังเด็ดขาด"
+            },
+            {
+                category: "ดิจิทัลรอยเท้า (Digital Footprint)",
+                question: "คำว่า 'Digital Footprint' หมายถึงสิ่งใด?",
+                choices: [
+                    "รอยเท้าที่เปื้อนบนหน้าจอคอมพิวเตอร์",
+                    "ร่องรอยประวัติกิจกรรม ข้อมูล และโพสต์ที่เราเคยทำไว้บนอินเทอร์เน็ต",
+                    "รองเท้าสำหรับใส่เล่นเกม AR",
+                    "โปรแกรมวัดระยะทางเดิน"
+                ],
+                correct: 1,
+                explanation: "สิ่งที่โพสต์หรือทำบนอินเทอร์เน็ตจะทิ้งร่องรอยไว้เสมอ ควรคิดก่อนโพสต์"
+            },
+            {
+                category: "การต่อต้านข่าวปลอม (Fake News)",
+                question: "หากได้รับข่าวพาดหัวน่าตกใจ เช่น 'ห้ามกินน้ำเปล่าช่วงนี้ มีสารพิษ' ควรทำอย่างไรก่อนแชร์?",
+                choices: [
+                    "รีบแชร์ลงกลุ่มครอบครัวทันทีด้วยความหวังดี",
+                    "ตรวจสอบความถูกต้องจากแหล่งข่าวที่น่าเชื่อถือ เช่น สำนักข่าวหรือหน่วยงานรัฐ",
+                    "ต่อเติมเนื้อหาให้ตื่นเต้นขึ้นแล้วค่อยส่ง",
+                    "โพสต์ด่าผู้ผลิตน้ำดื่ม"
+                ],
+                correct: 1,
+                explanation: "ชัวร์ก่อนแชร์ ตรวจสอบแหล่งที่มาจากหน่วยงานน่าเชื่อถือก่อนส่งต่อ"
+            },
+            {
+                category: "การเช็กอินสถานที่ (Location Privacy)",
+                question: "การเช็กอินตำแหน่งที่อยู่อาศัยแบบ Real-time เวลาอยู่บ้านคนเดียว มีความเสี่ยงอย่างไร?",
+                choices: [
+                    "ทำให้แบตเตอรี่โทรศัพท์เพิ่มขึ้น",
+                    "ผู้ไม่หวังดีอาจทราบว่าเราอยู่คนเดียว และก่อเหตุอันตรายได้",
+                    "อินเทอร์เน็ตจะช้าลง",
+                    "เพื่อนจะส่งของขวัญมาให้"
+                ],
+                correct: 1,
+                explanation: "การแชร์ตำแหน่งปัจจุบันขณะอยู่คนเดียวเปิดโอกาสให้มิจฉาชีพติดตามตัวได้"
+            },
+            {
+                category: "การทำธุรกรรมออนไลน์ (Online Purchase)",
+                question: "หากต้องการซื้ออุปกรณ์การเรียนออนไลน์ สิ่งใดปลอดภัยที่สุด?",
+                choices: [
+                    "ซื้อผ่านร้านค้าที่มีสัญลักษณ์โอนเงินส่วนตัวเข้าบัญชีส่วนบุคคลที่ไม่คุ้นเคย",
+                    "ซื้อผ่านร้านค้าทางการน่าเชื่อถือ และให้ผู้ปกครองดูแลการชำระเงิน",
+                    "แอบใช้บัตรผู้ปกครองโอนเงินเอง",
+                    "สั่งซื้อจากแชตที่สุ่มส่งมาในไลน์"
+                ],
+                correct: 1,
+                explanation: "การซื้อของออนไลน์ต้องได้รับการยินยอมและดูแลจากผู้ปกครองเสมอ"
+            },
+            {
+                category: "การตั้งค่าความเป็นส่วนตัว (Privacy Settings)",
+                question: "ควรตั้งค่าบัญชีโซเชียลมีเดียของเด็กนักเรียน ป.5 เป็นแบบใด?",
+                choices: [
+                    "สาธารณะ (Public) ให้ทุกคนในโลกมองเห็น",
+                    "ส่วนตัว (Private) เฉพาะเพื่อนและครอบครัวที่รู้จักเท่านั้น",
+                    "อนุญาตให้ใครก็เข้าดูรูปภาพได้",
+                    "ปิดการล็อกรหัสผ่านเข้าเครื่อง"
+                ],
+                correct: 1,
+                explanation: "เด็กนักเรียนควรตั้งค่าบัญชีเป็น Private เพื่อป้องกันคนแปลกหน้าเข้าถึง"
+            }
+        ];
+
+        /* =========================================================================
+           STATE & APP VARIABLES
+           ========================================================================= */
+        let currentQuestionIndex = 0;
+        let score = 0;
+        let playerName = "";
+        let playerPhotoDataUrl = "";
+        let soundEnabled = true;
+
+        // Camera & AR Tracking state
+        let webcamElement, arCanvas, arCtx, previewVideo, previewPhoto;
+        let camera = null;
+        let hands = null;
+        let hoverTargetId = null;
+        let hoverStartTime = 0;
+        const HOVER_HOLD_DURATION = 1200; // 1.2 seconds pinch/hover selection
+
+        /* Audio Synthesizer (No external asset files required) */
+        const AudioSynth = {
+            ctx: null,
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            },
+            playCorrect() {
+                if (!soundEnabled) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(523.25, now); // C5
+                osc.frequency.setValueAtTime(659.25, now + 0.1); // E5
+                osc.frequency.setValueAtTime(783.99, now + 0.2); // G5
+                osc.frequency.setValueAtTime(1046.50, now + 0.3); // C6
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(now + 0.5);
+            },
+            playWrong() {
+                if (!soundEnabled) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(220, now); // A3
+                osc.frequency.setValueAtTime(180, now + 0.15);
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(now + 0.35);
+            }
+        };
+
+        // Initialize on DOM load
+        window.addEventListener('DOMContentLoaded', () => {
+            webcamElement = document.getElementById('webcam');
+            previewVideo = document.getElementById('preview-video');
+            previewPhoto = document.getElementById('preview-photo');
+            arCanvas = document.getElementById('ar-canvas');
+            arCtx = arCanvas.getContext('2d');
+
+            // Set up name input listener
+            const nameInput = document.getElementById('player-name-input');
+            nameInput.addEventListener('input', checkStartConditions);
+
+            // Setup Camera stream
+            initWebcamStream();
+            
+            // Setup MediaPipe Hands
+            initMediaPipeHands();
+        });
+
+        async function initWebcamStream() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+                    audio: false
+                });
+                webcamElement.srcObject = stream;
+                previewVideo.srcObject = stream;
+                webcamElement.play();
+                previewVideo.play();
+            } catch (err) {
+                console.warn("Camera access denied or unvailable:", err);
+                alert("ไม่สามารถเปิดใช้งานกล้องได้ แอปจะใช้วิธีสัมผัสหน้าจอแทน");
+            }
+        }
+
+        function takeSnapshot() {
+            const canvas = document.getElementById('photo-canvas');
+            canvas.width = previewVideo.videoWidth || 320;
+            canvas.height = previewVideo.videoHeight || 320;
+            const ctx = canvas.getContext('2d');
+            
+            // Mirror image horizontally
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(previewVideo, 0, 0, canvas.width, canvas.height);
+
+            playerPhotoDataUrl = canvas.toDataURL('image/png');
+            previewPhoto.src = playerPhotoDataUrl;
+
+            previewVideo.classList.add('hidden');
+            previewPhoto.classList.remove('hidden');
+
+            document.getElementById('snap-btn-text').innerText = 'ถ่ายรูปใหม่';
+            checkStartConditions();
+        }
+
+        function checkStartConditions() {
+            const nameVal = document.getElementById('player-name-input').value.trim();
+            const btn = document.getElementById('btn-start-game');
+            if (nameVal.length > 0 && playerPhotoDataUrl) {
+                btn.disabled = false;
+                playerName = nameVal;
+            } else {
+                btn.disabled = true;
+            }
+        }
+
+        function initMediaPipeHands() {
+            hands = new Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+            });
+
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            hands.onResults(onHandResults);
+
+            // Camera frame capture loop using MediaPipe CameraUtils
+            const cameraUtils = new Camera(webcamElement, {
+                onFrame: async () => {
+                    await hands.send({ image: webcamElement });
+                },
+                width: 640,
+                height: 480
+            });
+            cameraUtils.start();
+        }
+
+        function onHandResults(results) {
+            // Resize canvas to match window
+            if (arCanvas.width !== window.innerWidth || arCanvas.height !== window.innerHeight) {
+                arCanvas.width = window.innerWidth;
+                arCanvas.height = window.innerHeight;
+            }
+
+            arCtx.clearRect(0, 0, arCanvas.width, arCanvas.height);
+
+            const pointerEl = document.getElementById('ar-pointer');
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // Landmark 8 is Index Finger Tip
+                const indexTip = landmarks[8];
+                const thumbTip = landmarks[4];
+
+                // Screen projection (mirrored horizontally)
+                const pointerX = (1 - indexTip.x) * window.innerWidth;
+                const pointerY = indexTip.y * window.innerHeight;
+
+                // Pinch detection (distance between index tip and thumb tip)
+                const distance = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
+                const isPinching = distance < 0.08;
+
+                // Move visual AR Pointer
+                pointerEl.style.left = `${pointerX}px`;
+                pointerEl.style.top = `${pointerY}px`;
+                pointerEl.classList.remove('hidden');
+
+                if (isPinching) {
+                    pointerEl.classList.add('pinching');
+                } else {
+                    pointerEl.classList.remove('pinching');
+                }
+
+                // Check collision with answer choice buttons
+                checkHoverSelection(pointerX, pointerY, isPinching);
+
+            } else {
+                pointerEl.classList.add('hidden');
+                resetHoverProgress();
+            }
+        }
+
+        function checkHoverSelection(x, y, isPinching) {
+            const choices = document.querySelectorAll('.choice-btn');
+            let hoveredElement = null;
+
+            choices.forEach(btn => {
+                const rect = btn.getBoundingClientRect();
+                if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                    hoveredElement = btn;
+                }
+            });
+
+            if (hoveredElement) {
+                const btnId = hoveredElement.getAttribute('data-choice-idx');
+                
+                if (hoverTargetId === btnId) {
+                    const elapsed = Date.now() - hoverStartTime;
+                    const progress = Math.min((elapsed / HOVER_HOLD_DURATION) * 100, 100);
+                    
+                    // Update progress ring path
+                    const path = document.getElementById('progress-path');
+                    if (path) {
+                        path.setAttribute('stroke-dasharray', `${progress}, 100`);
+                    }
+
+                    if (elapsed >= HOVER_HOLD_DURATION || isPinching) {
+                        // Trigger answer selection!
+                        const choiceIdx = parseInt(btnId);
+                        selectAnswer(choiceIdx);
+                        resetHoverProgress();
+                    }
+                } else {
+                    hoverTargetId = btnId;
+                    hoverStartTime = Date.now();
+                }
+            } else {
+                resetHoverProgress();
+            }
+        }
+
+        function resetHoverProgress() {
+            hoverTargetId = null;
+            hoverStartTime = 0;
+            const path = document.getElementById('progress-path');
+            if (path) path.setAttribute('stroke-dasharray', `0, 100`);
+        }
+
+        function startGame() {
+            // Update HUD Header Info
+            document.getElementById('game-player-name').innerText = playerName;
+            document.getElementById('game-player-img').src = playerPhotoDataUrl;
+            
+            currentQuestionIndex = 0;
+            score = 0;
+            document.getElementById('current-score').innerText = score;
+
+            // Switch screens
+            document.getElementById('screen-welcome').classList.add('hidden');
+            document.getElementById('screen-game').classList.remove('hidden');
+
+            renderQuestion();
+        }
+
+        function renderQuestion() {
+            const qData = QUESTION_BANK[currentQuestionIndex];
+            
+            // Progress
+            document.getElementById('question-progress').innerText = `${currentQuestionIndex + 1}/${QUESTION_BANK.length}`;
+            document.getElementById('q-category').innerText = qData.category;
+            document.getElementById('question-text').innerText = qData.question;
+
+            // Render Choices
+            const container = document.getElementById('choices-grid');
+            container.innerHTML = '';
+
+            qData.choices.forEach((choiceText, idx) => {
+                const btn = document.createElement('button');
+                btn.className = `choice-btn glass-card hover:bg-sky-900/60 active:scale-95 transition-all duration-200 rounded-2xl p-4 text-left text-xs sm:text-sm text-slate-100 font-medium border border-slate-700/60 flex items-center gap-3 relative overflow-hidden group`;
+                btn.setAttribute('data-choice-idx', idx);
+                btn.onclick = () => selectAnswer(idx);
+
+                btn.innerHTML = `
+                    <span class="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-sky-500/20 text-sky-300 border border-sky-500/30 font-bold flex items-center justify-center shrink-0 group-hover:bg-sky-500 group-hover:text-white transition">
+                        ${String.fromCharCode(65 + idx)}
+                    </span>
+                    <span class="leading-snug">${choiceText}</span>
+                `;
+                container.appendChild(btn);
+            });
+        }
+
+        function selectAnswer(choiceIdx) {
+            const qData = QUESTION_BANK[currentQuestionIndex];
+            const buttons = document.querySelectorAll('.choice-btn');
+
+            // Disable further clicks momentarily
+            buttons.forEach(b => b.onclick = null);
+
+            if (choiceIdx === qData.correct) {
+                // Correct Answer
+                score += 10;
+                document.getElementById('current-score').innerText = score;
+                AudioSynth.playCorrect();
+
+                buttons[choiceIdx].classList.remove('glass-card');
+                buttons[choiceIdx].classList.add('bg-emerald-600/80', 'border-emerald-400', 'text-white', 'scale-102');
+
+                // Particle confetti explosion
+                if (typeof confetti === 'function') {
+                    confetti({ particleCount: 40, spread: 60, origin: { y: 0.6 } });
+                }
+            } else {
+                // Incorrect Answer
+                AudioSynth.playWrong();
+                buttons[choiceIdx].classList.remove('glass-card');
+                buttons[choiceIdx].classList.add('bg-rose-600/80', 'border-rose-400', 'text-white');
+
+                // Highlight correct one
+                buttons[qData.correct].classList.remove('glass-card');
+                buttons[qData.correct].classList.add('bg-emerald-600/80', 'border-emerald-400', 'text-white');
+            }
+
+            // Move to next question after delay
+            setTimeout(() => {
+                currentQuestionIndex++;
+                if (currentQuestionIndex < QUESTION_BANK.length) {
+                    renderQuestion();
+                } else {
+                    finishGame();
+                }
+            }, 1800);
+        }
+
+        async function finishGame() {
+            document.getElementById('screen-game').classList.add('hidden');
+            document.getElementById('screen-summary').classList.remove('hidden');
+
+            document.getElementById('final-score').innerText = score;
+
+            // Grade evaluation
+            let grade = "";
+            if (score >= 100) grade = "สุดยอดนักสืบไซเบอร์! 🌟";
+            else if (score >= 70) grade = "ผ่านเกณฑ์ระดับดี 👍";
+            else grade = "ควรทบทวนความรู้เพิ่มเติม 📚";
+
+            document.getElementById('final-grade').innerText = grade;
+
+            // Big Confetti
+            if (typeof confetti === 'function') {
+                confetti({ particleCount: 100, spread: 80, origin: { y: 0.5 } });
+            }
+
+            // Save score to Firebase
+            if (window.saveScoreToLeaderboard) {
+                await window.saveScoreToLeaderboard(playerName, score);
+            }
+
+            // Fetch Leaderboard
+            if (window.fetchLeaderboard) {
+                await window.fetchLeaderboard();
+            }
+        }
+
+        function restartGame() {
+            document.getElementById('screen-summary').classList.add('hidden');
+            document.getElementById('screen-welcome').classList.remove('hidden');
+        }
+
+        function toggleAudio() {
+            soundEnabled = !soundEnabled;
+            const icon = document.getElementById('audio-icon');
+            if (soundEnabled) {
+                icon.className = 'fa-solid fa-volume-high';
+            } else {
+                icon.className = 'fa-solid fa-volume-xmark text-rose-400';
+            }
+        }
+
+        // Global function bindings
+        window.takeSnapshot = takeSnapshot;
+        window.startGame = startGame;
+        window.restartGame = restartGame;
+        window.toggleAudio = toggleAudio;
+    </script>
+</body>
+</html>
